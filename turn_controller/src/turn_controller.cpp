@@ -1,5 +1,3 @@
-#include "rclcpp/logging.hpp"
-#include "rclcpp/rate.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -18,10 +16,11 @@ class TurnController:
     public rclcpp::Node {
 
 public:   
-    TurnController():
+    TurnController(int scene_number):
         Node("turn_controller_node"),
-        kP_(0.4), kD_(1.0), kI_(0.01),
-        rate(100ms){
+        kP_(0.2), kD_(0.2), kI_(0.01),
+        rate(100ms),
+        scene_number_(scene_number){
         using std::placeholders::_1;
 
         timer_callback_group_ = this->create_callback_group(
@@ -42,6 +41,7 @@ public:
             "cmd_vel", 1);
         
         current_pose_ << 0.0, 0.0, 0.0;
+        set_waypoints();
     }
 
 private:
@@ -58,7 +58,7 @@ private:
         prev_time = this->get_clock()->now();
         float dt;
 
-        for(size_t i = 0; i < 3; i++) {
+        for(size_t i = 0; i < waypoints_.size(); i++) {
             RCLCPP_INFO(this->get_logger(), "rotating toward waypoint %ld", i+1);
             waypoint_orientation = std::atan2(
                     waypoints_[i](1) - current_pose_(1),
@@ -76,6 +76,10 @@ private:
 
                 input = kP_*err_orientation + kI_*sum_I + kD_*X_dot;
                 RCLCPP_DEBUG(this->get_logger(), "err_orientation: %f",err_orientation);
+                RCLCPP_INFO(this->get_logger(), "P: %f, I: %f, D: %f",
+                kP_*err_orientation,
+                kI_*sum_I,
+                kD_*X_dot);
 
                 cmd_vel.angular.z = input;
                 twist_pub_->publish(cmd_vel);
@@ -103,6 +107,28 @@ private:
         current_pose_(2) = tf2::impl::getYaw(q);
     }
 
+    void set_waypoints() {
+        switch (scene_number_) {
+            case 1: // Simulation
+            waypoints_ = {
+                {0.6, -1.4},
+                {1.40, -0.25},
+                {0.8, 0.55}};
+            break;
+
+            case 2: // CyberWorld
+            waypoints_ = {
+                {1.0, -0.5},
+                {0.5, -1.05}};
+            break;
+
+            default:
+            RCLCPP_ERROR(this->get_logger(), "Invalid scene number: %d",
+                        scene_number_);
+            return;
+        }
+    }
+
     rclcpp::CallbackGroup::SharedPtr timer_callback_group_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::SubscriptionOptions odom_sub_options_;
@@ -116,11 +142,19 @@ private:
         {1.40, -0.25},
         {0.8, 0.55}};
     float kP_, kI_, kD_;
+
+    int scene_number_;
 };
 
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
-  auto turn_controller = std::make_shared<TurnController>();
+
+  int scene_number = 1; // Default scene number
+  if (argc > 1) {
+    scene_number = std::atoi(argv[1]);
+  }
+
+  auto turn_controller = std::make_shared<TurnController>(scene_number);
 
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(turn_controller);

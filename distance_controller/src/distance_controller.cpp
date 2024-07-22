@@ -1,8 +1,6 @@
-#include "rclcpp/callback_group.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/twist.hpp"
-#include "rclcpp/utilities.hpp"
 #include "tf2/impl/utils.h"
 #include <Eigen/Dense>
 
