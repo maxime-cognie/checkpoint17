@@ -11,6 +11,12 @@ find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+include_directories(
+  ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -23,5 +29,13 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+add_executable(distance_controller src/distance_controller.cpp)
+ament_target_dependencies(distance_controller rclcpp geometry_msgs nav_msgs tf2)
+
+install(TARGETS
+	distance_controller
+	DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()
