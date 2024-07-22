@@ -76,11 +76,7 @@ private:
 
                 input = kP_*err_orientation + kI_*sum_I + kD_*X_dot;
                 RCLCPP_DEBUG(this->get_logger(), "err_orientation: %f",err_orientation);
-                RCLCPP_INFO(this->get_logger(), "P: %f, I: %f, D: %f",
-                kP_*err_orientation,
-                kI_*sum_I,
-                kD_*X_dot);
-
+                
                 cmd_vel.angular.z = input;
                 twist_pub_->publish(cmd_vel);
 
