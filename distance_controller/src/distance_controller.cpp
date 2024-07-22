@@ -52,8 +52,7 @@ private:
         Eigen::Vector2f prev_pose{0.0, 0.0};
         Eigen::Vector2f sum_I;
         Eigen::Vector2f X_dot;
-        Eigen::Vector2f input, U, U_prev;
-        U_prev << 0.0, 0.0;
+        Eigen::Vector2f input;
         rclcpp::Time current_time = this->get_clock()->now(),
         prev_time = this->get_clock()->now();
         float dt;
@@ -70,8 +69,7 @@ private:
                 sum_I += err_pose * dt;
                 X_dot = (current_pose_ - prev_pose)/dt;
 
-                U = kP_*err_pose + kI_*sum_I + kD_*X_dot;
-                input = U;
+                input = kP_*err_pose + kI_*sum_I + kD_*X_dot;
                 RCLCPP_DEBUG(this->get_logger(), "err_pose: %f, %f",err_pose(0), err_pose(1));
 
                 cmd_vel.linear.x = input(0);
@@ -80,9 +78,11 @@ private:
 
                 prev_pose = current_pose_;
                 prev_time = current_time;
-                U_prev = U;
+
                 rate.sleep();
             }
+            RCLCPP_INFO(this->get_logger(), "Waypoint %ld reached", i+1);
+            std::this_thread::sleep_for(1.5s);
         }
         cmd_vel.linear.x = 0;
         cmd_vel.linear.y = 0;
@@ -115,8 +115,3 @@ int main(int argc, char *argv[]) {
   rclcpp::shutdown();
   return 0;
 }
-
-//     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-//         current_pose_(0) = msg->pose.pose.position.x;
-//         current_pose_(1) = msg->pose.pose.position.y;
-//     }
