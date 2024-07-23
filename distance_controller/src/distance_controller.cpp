@@ -55,7 +55,7 @@ private:
         prev_time = this->get_clock()->now();
         float dt;
 
-        for(size_t i = 0; i < 3; i++) {
+        for(size_t i = 0; i < waypoints_.size(); i++) {
             RCLCPP_INFO(this->get_logger(), "Moving to waypoint %ld", i+1);
             err_pose = waypoints_[i] - current_pose_;
             sum_I << 0.0, 0.0;
