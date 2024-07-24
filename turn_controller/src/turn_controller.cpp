@@ -67,6 +67,8 @@ private:
             prev_orientation = current_pose_(2);
             sum_I = 0.0;
             X_dot = 0.0;
+
+            
             while (std::abs(err_orientation) >= 0.02 && rclcpp::ok()) {
                 err_orientation = waypoint_orientation - current_pose_(2);
                 current_time = this->get_clock()->now();

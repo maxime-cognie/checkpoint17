@@ -3,6 +3,9 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "rclcpp/time.hpp"
 #include "tf2/impl/utils.h"
+#include "ament_index_cpp/get_package_share_directory.hpp" // Include this header
+#include "yaml-cpp/yaml.h" // include the yaml library
+#include <filesystem> // Include the filesystem library
 #include <Eigen/Dense>
 
 #include <cstddef>
@@ -15,10 +18,11 @@ class PIDMazeSolver:
     public rclcpp::Node {
 
 public:   
-    PIDMazeSolver():
+    PIDMazeSolver(int scene_number):
         Node("distance_controller_node"),
         kP_pose_(1.0), kD_pose_(0.3), kI_pose_(0.01),
-        kP_orientation_(0.5), kD_orientation_(0.01), kI_orientation_(0.02){
+        kP_orientation_(0.8), kD_orientation_(0.1), kI_orientation_(0.04),
+        scene_number_(scene_number){
         using std::placeholders::_1;
 
         timer_callback_group_ = this->create_callback_group(
@@ -39,21 +43,16 @@ public:
             "cmd_vel", 1);
         
         current_pose_ << 0.0, 0.0;
-        waypoints_ = {
-            {0.51,  -0.14},
-            {0.55,  -1.35},
-            {1.05,  -1.35},
-            {1.05,  -0.85},
-            {1.45,  -0.85},
-            {1.45,  -0.30},
-            {2.0,   -0.30},
-            {2.0,   0.57},
-            {1.5,   0.57},
-            {1.5,   0.25},
-            {1.0,  0.25},
-            {0.68,   0.57},
-            {0.1,   0.55}
-        };
+        waypoints_ = readPointsFromYAML();
+
+        if (scene_number > 1) {
+            kP_pose_ = 0.15;
+            kI_pose_ = 0.002;
+            kD_pose_ = 0.1;
+            kP_orientation_ = 0.25;
+            kD_orientation_ = 0.1;
+            kI_orientation_ = 0.001;
+        }
     }
 
 private:
@@ -64,12 +63,17 @@ private:
         float time_elapsed;
         starting_time = this->get_clock()->now();
 
+        /*  For all the waypoints: 
+            - Align the robot with the waypoint
+            - Move forward until the robot reaches the waypoint
+        */
         for(size_t i = 0; i < waypoints_.size(); i++) {
             RCLCPP_INFO(this->get_logger(), "Moving to waypoint %ld", i+1);
             turn(waypoints_[i]);
             move_forward(waypoints_[i]);
             RCLCPP_INFO(this->get_logger(), "Waypoint %ld reached", i+1);
         }
+        // Display the time took by the robot to solve the maze
         time_elapsed = (this->get_clock()->now() - starting_time).seconds();
         RCLCPP_INFO(this->get_logger(), "Mission done in %.1f s!", time_elapsed);
     }
@@ -92,23 +96,34 @@ private:
         float X_dot(0.0);
         float input;
         
-
         rclcpp::Time current_time = this->get_clock()->now(),
         prev_time = this->get_clock()->now();
         float dt;
-
         rclcpp::Rate rate(100ms);
 
+        // compute and send linear velocity, 
+        // until the robot reaches the waypoint
         while (
             (std::abs(wp(0) - current_pose_(0)) > 0.04 || 
             std::abs(wp(1) - current_pose_(1)) > 0.04) && 
             rclcpp::ok()) {
+            waypoint_orientation_ = std::atan2(
+            wp(1) - current_pose_(1),
+            wp(0) - current_pose_(0));
+            err_orientation_ = waypoint_orientation_ - orientation_;
+            if (err_orientation_ > 0.05 && (wp - current_pose_).norm() > 0.2) {
+                cmd_vel_.linear.x = 0;
+                cmd_vel_.linear.y = 0;
+                twist_pub_->publish(cmd_vel_);
+                turn(wp);
+            }
             err_pose = (wp - current_pose_).norm();
             current_time = this->get_clock()->now();
             dt = (current_time - prev_time).seconds();
             sum_I += err_pose * dt;
             X_dot = (current_pose_ - prev_pose).norm()/dt;
 
+            // PID controller (linear velocity)
             input = 
                 kP_pose_*err_pose + 
                 kI_pose_*sum_I + 
@@ -137,38 +152,94 @@ private:
         rclcpp::Time current_time = this->get_clock()->now(),
         prev_time = this->get_clock()->now();
         float dt;
-
         rclcpp::Rate rate(100ms);
+
         waypoint_orientation_ = std::atan2(
             wp(1) - current_pose_(1),
             wp(0) - current_pose_(0));
         err_orientation_ = waypoint_orientation_ - orientation_;
 
-        while (std::abs(err_orientation_) >= 0.03 && rclcpp::ok()) {
+        // compute and send angular velocity, 
+        // until the robot is align with the waypoint
+        while (std::abs(err_orientation_) >= 0.02 && rclcpp::ok()) {
             waypoint_orientation_ = std::atan2(
                 wp(1) - current_pose_(1),
                 wp(0) - current_pose_(0));
             err_orientation_ = waypoint_orientation_ - orientation_;
             current_time = this->get_clock()->now();
             dt = (current_time - prev_time).seconds();
+
             sum_I += err_orientation_ * dt;
             X_dot = (orientation_ - prev_orientation)/dt;
 
+            // PID controller (angular velocity)
             input = 
                 kP_orientation_*err_orientation_ + 
                 kI_orientation_*sum_I + 
                 kD_orientation_*X_dot;
-            
-            cmd_vel_.angular.z = input;
+
+            if(orientation_*waypoint_orientation_ < -3) {
+                input = -input;
+            }
+            cmd_vel_.angular.z = scene_number_ > 1? - input: input;
             twist_pub_->publish(cmd_vel_);
 
             prev_orientation= orientation_;
             prev_time = current_time;
             std::this_thread::sleep_for(100ms);
         }
+        // stop robot motion when waypoint is reached
         cmd_vel_.angular.z = 0;
         twist_pub_->publish(cmd_vel_);
     }
+
+    std::vector<Eigen::Vector2f> readPointsFromYAML() {
+    std::vector<Eigen::Vector2f> setpoints;
+
+    // Get the package's share directory and append the YAML file path
+    std::string package_share_directory =
+        ament_index_cpp::get_package_share_directory(
+            "pid_maze_solver"); // Replace with your package name
+
+    auto waypoint_file_name = "sim_points.yaml";
+
+    switch (scene_number_) {
+    case 1: // Simulation
+      waypoint_file_name = "sim_points.yaml";
+      break;
+
+    case 2: // CyberWorld
+      waypoint_file_name = "cyberworld_points.yaml";
+      break;
+
+    default:
+      RCLCPP_ERROR(this->get_logger(), "Invalid scene number: %d",
+                   scene_number_);
+      return setpoints;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "############# Waypoint file loaded: %s",
+                waypoint_file_name);
+
+    std::string yaml_file =
+        package_share_directory + "/waypoints/" + waypoint_file_name;
+
+    // Read points from the YAML file
+    try {
+        YAML::Node config = YAML::LoadFile(yaml_file);
+
+        if (config["points"]) {
+            for(auto p : config["points"]) {
+                setpoints.push_back({p[0].as<float>(), p[1].as<float>()});
+            }
+        }
+    } catch (const YAML::Exception &e) {
+        RCLCPP_ERROR(this->get_logger(), "Failed to read YAML file: %s",
+                   e.what());
+    }
+
+    return setpoints;
+  }
 
     rclcpp::CallbackGroup::SharedPtr timer_callback_group_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -183,16 +254,23 @@ private:
 
     float kP_pose_, kI_pose_, kD_pose_;
     float kP_orientation_, kI_orientation_, kD_orientation_;
+
+    int scene_number_;
 };
 
 int main(int argc, char *argv[]) {
-  rclcpp::init(argc, argv);
-  auto pid_maze_controller = std::make_shared<PIDMazeSolver>();
+    rclcpp::init(argc, argv);
 
-  rclcpp::executors::MultiThreadedExecutor executor;
-  executor.add_node(pid_maze_controller);
-  executor.spin();
+    int scene_number = 1; // Default scene number
+    if (argc > 1) {
+        scene_number = std::atoi(argv[1]);
+    }
+    auto pid_maze_controller = std::make_shared<PIDMazeSolver>(scene_number);
 
-  rclcpp::shutdown();
-  return 0;
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(pid_maze_controller);
+    executor.spin();
+
+    rclcpp::shutdown();
+    return 0;
 }
