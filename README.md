@@ -65,7 +65,7 @@ ros2 run pid_maze_solver pid_maze_solver
 
 For this task:  
 1. Place the robot at the starting point like below:    
-![ROSBot XL starting point](https://github.com/maxime-cognie/checkpoint17/blob/main/ROSBot_XL_start.png?raw=true)   
+![ROSBot XL starting point](https://github.com/maxime-cognie/checkpoint17/blob/main/pid_maze_solver/ressource/ROSBot_XL_start.png?raw=true)   
 2. Reset the odometry by calling the **/set_pose** service: 
 `ros2 service call /set_pose robot_localization/srv/SetPose "pose: {pose: {pose: {position: {x: 0.0,y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0}}}}"` 
 3. Execute the maze solver program: 
