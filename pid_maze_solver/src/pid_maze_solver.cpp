@@ -9,6 +9,7 @@
 #include <Eigen/Dense>
 
 #include <cstddef>
+#include <cmath>
 #include <functional>
 #include <thread>
 
@@ -45,13 +46,14 @@ public:
         current_pose_ << 0.0, 0.0;
         waypoints_ = readPointsFromYAML();
 
+        // adapt the PID's coefficient for the real robot
         if (scene_number > 1) {
-            kP_pose_ = 0.15;
+            kP_pose_ = 0.5;
             kI_pose_ = 0.002;
             kD_pose_ = 0.1;
-            kP_orientation_ = 0.25;
+            kP_orientation_ = 0.5;
             kD_orientation_ = 0.1;
-            kI_orientation_ = 0.001;
+            kI_orientation_ = 0.002;
         }
     }
 
@@ -111,7 +113,12 @@ private:
             wp(1) - current_pose_(1),
             wp(0) - current_pose_(0));
             err_orientation_ = waypoint_orientation_ - orientation_;
-            if (err_orientation_ > 0.05 && (wp - current_pose_).norm() > 0.2) {
+            err_orientation_ = std::abs(err_orientation_)>M_PI?
+                (waypoint_orientation_<0)?
+                -((2*M_PI + waypoint_orientation_) - orientation_):
+                waypoint_orientation_ - (2*M_PI + orientation_):
+                err_orientation_;
+            if (std::abs(err_orientation_) > 0.05 && (wp - current_pose_).norm() > 0.1) {
                 cmd_vel_.linear.x = 0;
                 cmd_vel_.linear.y = 0;
                 twist_pub_->publish(cmd_vel_);
@@ -161,11 +168,18 @@ private:
 
         // compute and send angular velocity, 
         // until the robot is align with the waypoint
-        while (std::abs(err_orientation_) >= 0.02 && rclcpp::ok()) {
+        while (std::abs(err_orientation_) >= 0.01 && rclcpp::ok()) {
             waypoint_orientation_ = std::atan2(
                 wp(1) - current_pose_(1),
                 wp(0) - current_pose_(0));
             err_orientation_ = waypoint_orientation_ - orientation_;
+            // normalize the orientation error 
+            err_orientation_ = std::abs(err_orientation_)>M_PI?
+                (waypoint_orientation_<0)?
+                ((2*M_PI + waypoint_orientation_) - orientation_):
+                waypoint_orientation_ - (2*M_PI + orientation_):
+                err_orientation_;
+
             current_time = this->get_clock()->now();
             dt = (current_time - prev_time).seconds();
 
@@ -178,17 +192,14 @@ private:
                 kI_orientation_*sum_I + 
                 kD_orientation_*X_dot;
 
-            if(orientation_*waypoint_orientation_ < -3) {
-                input = -input;
-            }
-            cmd_vel_.angular.z = scene_number_ > 1? - input: input;
+            cmd_vel_.angular.z = input;
             twist_pub_->publish(cmd_vel_);
 
             prev_orientation= orientation_;
             prev_time = current_time;
             std::this_thread::sleep_for(100ms);
         }
-        // stop robot motion when waypoint is reached
+        // stop robot motion when the robot is align with the waypoint
         cmd_vel_.angular.z = 0;
         twist_pub_->publish(cmd_vel_);
     }
